@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>ASCII Video Player — Canvas Mode (Aspect-Ratio Fix)</title>
+<style>
+  :root { --bg:#000; --fg:#fff; --accent:#fff; }
+  * { box-sizing: border-box; }
+  html, body {
+    height: 100%; margin: 0;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+    background: var(--bg); color: var(--fg); overflow: hidden;
+  }
+
+  /* Splash screen image */
+  #splash {
+    position: fixed; inset: 0;
+    background-image: url('https://i.imgur.com/2AFbm1R.png');
+    background-size: cover; background-position: center;
+    z-index: 0; opacity: 1; transition: opacity 320ms ease;
+  }
+  #splash.hide { opacity: 0; pointer-events: none; }
+
+  /* Centre container for ASCII output */
+  #ascii-container {
+    position: fixed; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    padding-bottom: 72px; /* room for controls */
+    z-index: 1; overflow: hidden;
+  }
+
+  /* Visible ASCII canvas (we scale this to fit) */
+  #asciiCanvas {
+    image-rendering: pixelated;
+    transform-origin: center center;
+    will-change: transform;
+    background: transparent;
+  }
+
+  /* Controls */
+  .controls {
+    position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%);
+    display: flex; gap: 12px; align-items: center;
+    background: rgba(0,0,0,0.5); border: 2px solid var(--accent);
+    border-radius: 12px; padding: 10px 12px; z-index: 2; backdrop-filter: blur(6px);
+  }
+  .controls label.btn {
+    display: inline-block; background-color: var(--accent); color:#000;
+    padding: 8px 14px; font-size: 14px; border-radius: 10px; cursor: pointer;
+    border: 2px solid var(--accent); transition: all .2s ease; user-select: none; white-space: nowrap;
+  }
+  .controls label.btn:hover { filter: brightness(0.92); }
+  .controls input[type="file"] { position: absolute; opacity: 0; width: 1px; height: 1px; pointer-events: none; }
+  .controls .group { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+  .controls input[type="range"] { width: 160px; }
+  .controls input[type="checkbox"] { transform: translateY(1px); }
+  .controls button {
+    background: transparent; color: var(--fg); border: 1px solid var(--accent);
+    border-radius: 8px; padding: 6px 10px; cursor: pointer; font-size: 13px;
+  }
+  .controls button:hover { background: rgba(255,255,255,0.1); }
+
+  /* Hidden work elements */
+  video, canvas.offscreen { display: none; }
+</style>
+</head>
+<body>
+  <div id="splash" aria-hidden="true"></div>
+
+  <div id="ascii-container">
+    <canvas id="asciiCanvas"></canvas>
+  </div>
+
+  <div class="controls" role="group" aria-label="Controls">
+    <input id="video-input" type="file" accept="video/*">
+    <label class="btn" for="video-input">Choose Video</label>
+
+    <div class="group">
+      <span>Columns</span>
+      <input id="cols" type="range" min="60" max="180" value="120" />
+      <span id="colsVal">120</span>
+    </div>
+
+    <div class="group">
+      <span>Font</span>
+      <input id="font" type="range" min="8" max="16" value="12" />
+      <span id="fontVal">12px</span>
+    </div>
+
+    <div class="group">
+      <label><input id="invert" type="checkbox"> Invert</label>
+    </div>
+
+    <div class="group">
+      <label><input id="colorize" type="checkbox"> Colour</label>
+    </div>
+
+    <button id="toggle">Pause</button>
+  </div>
+
+  <!-- Work elements -->
+  <video id="vid" crossorigin="anonymous" playsinline muted></video>
+  <canvas id="sampler" class="offscreen"></canvas>
+
+<script>
+(() => {
+  // ===== Config =====
+  const TARGET_FPS = 24;
+  const targetMs = 1000 / TARGET_FPS;
+
+  const RAMPS = {
+    classic: "@%#*+=-:. ",
+    smooth: "$@B%8&WM#*oahkbdpqwmZO0QLCJUYXzcvunxrjft|()1{}[]?-_+~<>i!lI;:,\"^`'. ",
+    blocky: "MW&8%B@$#*:. "
+  };
+  const ramp = RAMPS.smooth;
+
+  // ===== Elements =====
+  const container = document.getElementById('ascii-container');
+  const canvas = document.getElementById('asciiCanvas');
+  const ctx = canvas.getContext('2d');
+  const splash = document.getElementById('splash');
+
+  const videoInput = document.getElementById('video-input');
+  const vid = document.getElementById('vid');
+  const sampler = document.getElementById('sampler');
+  const sctx = sampler.getContext('2d', { willReadFrequently: true });
+
+  const colsSlider = document.getElementById('cols');
+  const colsVal = document.getElementById('colsVal');
+  const fontSlider = document.getElementById('font');
+  const fontVal = document.getElementById('fontVal');
+  const invertChk = document.getElementById('invert');
+  const colorizeChk = document.getElementById('colorize');
+  const toggleBtn = document.getElementById('toggle');
+
+  // ===== State =====
+  let cols = parseInt(colsSlider.value, 10);
+  let fontPx = parseInt(fontSlider.value, 10);
+  let running = true;
+  let needsResize = false;
+  let needsLayout = true;
+  let needsScale = true;
+
+  // Monospace glyph metrics (measured)
+  let cellW = 8;   // width of a glyph cell in CSS px
+  let cellH = 12;  // height of a glyph cell in CSS px
+
+  // Precompute 0..255 → char lookup
+  const LUT = (() => {
+    const arr = new Array(256);
+    const r = ramp;
+    const len = r.length - 1;
+    for (let i = 0; i < 256; i++) arr[i] = r[Math.round((i/255)*len)];
+    return arr;
+  })();
+
+  function measureFont() {
+    ctx.font = `${fontPx}px monospace`;
+    ctx.textBaseline = 'top';
+    const m = ctx.measureText('M');
+    const ascent  = m.actualBoundingBoxAscent  ?? fontPx * 0.8;
+    const descent = m.actualBoundingBoxDescent ?? fontPx * 0.2;
+    cellW = Math.max(1, m.width);
+    cellH = Math.max(1, ascent + descent);
+  }
+
+  // *** Aspect-ratio safe sizing using measured cellW/cellH ***
+  function setSampleSize() {
+    if (!vid.videoWidth || !vid.videoHeight) return;
+    cols = parseInt(colsSlider.value, 10);
+    colsVal.textContent = cols;
+
+    const videoAspectHOverW = vid.videoHeight / vid.videoWidth; // H/W
+    const cellAspectHOverW  = cellH / cellW;                    // H/W of glyph cell
+    const rows = Math.max(1, Math.floor(cols * videoAspectHOverW / cellAspectHOverW));
+
+    // Sampler grid in "cells"
+    sampler.width = cols;
+    sampler.height = rows;
+
+    // Visible canvas in CSS pixels (one cell maps to cellW x cellH px)
+    canvas.width = Math.max(1, Math.floor(cols * cellW));
+    canvas.height = Math.max(1, Math.floor(rows * cellH));
+
+    needsScale = true;
+  }
+
+  function applyFontSize() {
+    fontPx = parseInt(fontSlider.value, 10);
+    fontVal.textContent = fontPx + 'px';
+    measureFont();
+    needsLayout = true;
+    needsScale = true;
+  }
+
+  function toggleRun() {
+    running = !running;
+    toggleBtn.textContent = running ? 'Pause' : 'Play';
+    if (running && !vid.paused) requestAnimationFrame(renderLoop);
+  }
+
+  function applyInvert() {
+    canvas.style.filter = invertChk.checked ? 'invert(1)' : 'none';
+  }
+
+  function drawAsciiFrame() {
+    const w = sampler.width, h = sampler.height;
+    sctx.drawImage(vid, 0, 0, w, h);
+    const { data } = sctx.getImageData(0, 0, w, h);
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.font = `${fontPx}px monospace`;
+    ctx.textBaseline = 'top';
+
+    if (colorizeChk.checked) {
+      for (let y = 0; y < h; y++) {
+        const rowIndex = y * w * 4;
+        for (let x = 0; x < w; x++) {
+          const i = rowIndex + x*4;
+          const r = data[i], g = data[i+1], b = data[i+2];
+          const bright = (77*r + 150*g + 29*b) >> 8;
+          ctx.fillStyle = `rgb(${r},${g},${b})`;
+          ctx.fillText(LUT[bright], x*cellW, y*cellH);
+        }
+      }
+    } else {
+      for (let y = 0; y < h; y++) {
+        const rowIndex = y * w * 4;
+        const lineChars = new Array(w);
+        for (let x = 0; x < w; x++) {
+          const i = rowIndex + x*4;
+          const r = data[i], g = data[i+1], b = data[i+2];
+          const bright = (77*r + 150*g + 29*b) >> 8;
+          lineChars[x] = LUT[bright];
+        }
+        ctx.fillStyle = '#fff';
+        ctx.fillText(lineChars.join(''), 0, y*cellH);
+      }
+    }
+  }
+
+  // Scale visible canvas to fit viewport while centred
+  function applyScale() {
+    const availW = container.clientWidth;
+    const availH = container.clientHeight;
+    if (!availW || !availH || !canvas.width || !canvas.height) return;
+    const scale = Math.min(availW / canvas.width, availH / canvas.height);
+    canvas.style.transform = `scale(${scale})`;
+    needsScale = false;
+  }
+
+  // Render loop @ ~24 fps
+  let lastTs = 0;
+  function renderLoop(ts) {
+    if (!running || vid.paused || vid.ended) return;
+
+    const dt = ts - lastTs;
+    if (dt >= targetMs) {
+      lastTs = ts;
+
+      if (needsLayout) { setSampleSize(); needsLayout = false; }
+      if (needsResize) { setSampleSize(); needsResize = false; }
+
+      drawAsciiFrame();
+      if (needsScale) applyScale();
+    }
+    requestAnimationFrame(renderLoop);
+  }
+
+  // ===== Events =====
+  videoInput.addEventListener('change', async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      vid.src = URL.createObjectURL(file);
+      await vid.play();
+    } catch (err) {
+      vid.muted = true;
+      await vid.play().catch(()=>{});
+    }
+  });
+
+  vid.addEventListener('playing', () => {
+    // Hide splash fully
+    splash.classList.add('hide');
+    setTimeout(() => { splash.style.display = 'none'; }, 340);
+
+    // Layout & start loop
+    measureFont();
+    setSampleSize();
+    applyScale();
+
+    running = true;
+    toggleBtn.textContent = 'Pause';
+    requestAnimationFrame(renderLoop);
+  });
+
+  vid.addEventListener('loadedmetadata', () => {
+    // Ensure we have valid font metrics before sizing
+    measureFont();
+    needsLayout = true;
+  });
+
+  colsSlider.addEventListener('input', () => { colsVal.textContent = colsSlider.value; needsResize = true; });
+  fontSlider.addEventListener('input', applyFontSize);
+  invertChk.addEventListener('change', applyInvert);
+  colorizeChk.addEventListener('change', () => {}); // keep toggle
+  toggleBtn.addEventListener('click', toggleRun);
+
+  window.addEventListener('resize', () => { needsScale = true; });
+
+  // Init
+  measureFont();
+  applyInvert();
+})();
+</script>
+</body>
+</html>
