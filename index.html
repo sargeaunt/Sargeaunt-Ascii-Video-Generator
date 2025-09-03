@@ -2,318 +2,611 @@
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>ASCII Video Player — Canvas Mode (Aspect-Ratio Fix)</title>
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Live Mirror Lab — Effects Menu</title>
 <style>
   :root { --bg:#000; --fg:#fff; --accent:#fff; }
-  * { box-sizing: border-box; }
-  html, body {
-    height: 100%; margin: 0;
-    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
-    background: var(--bg); color: var(--fg); overflow: hidden;
-  }
+  *{box-sizing:border-box}
+  html,body{height:100%;margin:0;background:var(--bg);color:var(--fg);
+    font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;overflow:hidden}
 
-  /* Splash screen image */
-  #splash {
-    position: fixed; inset: 0;
-    background-image: url('https://i.imgur.com/2AFbm1R.png');
-    background-size: cover; background-position: center;
-    z-index: 0; opacity: 1; transition: opacity 320ms ease;
-  }
-  #splash.hide { opacity: 0; pointer-events: none; }
+  /* Splash + Menu */
+  #splash{position:fixed;inset:0;background:url('https://i.imgur.com/2AFbm1R.png') center/cover no-repeat;
+    z-index:0;opacity:1;transition:opacity .32s ease}
+  #splash.hide{opacity:0;pointer-events:none}
+  #menu{position:fixed;inset:0;z-index:3;display:grid;place-items:center;
+    background:rgba(0,0,0,.55);backdrop-filter:blur(4px)}
+  #menu .panel{background:rgba(0,0,0,.7);border:2px solid var(--accent);border-radius:14px;padding:16px;width:min(820px,92vw)}
+  #menu h1{margin:0 0 12px;font-size:18px}
+  #menu .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px}
+  #menu button.effect{padding:12px;border-radius:10px;background:#111;color:#fff;border:1px solid #fff;cursor:pointer}
+  #menu button.effect:hover{background:#1a1a1a}
 
-  /* Centre container for ASCII output */
-  #ascii-container {
-    position: fixed; inset: 0;
-    display: flex; align-items: center; justify-content: center;
-    padding-bottom: 72px; /* room for controls */
-    z-index: 1; overflow: hidden;
-  }
-
-  /* Visible ASCII canvas (we scale this to fit) */
-  #asciiCanvas {
-    image-rendering: pixelated;
-    transform-origin: center center;
-    will-change: transform;
-    background: transparent;
-  }
+  /* Stage */
+  #stage{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;padding-bottom:92px;z-index:1;overflow:hidden}
+  #outCanvas{image-rendering:pixelated;transform-origin:center center;will-change:transform;background:transparent}
 
   /* Controls */
-  .controls {
-    position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%);
-    display: flex; gap: 12px; align-items: center;
-    background: rgba(0,0,0,0.5); border: 2px solid var(--accent);
-    border-radius: 12px; padding: 10px 12px; z-index: 2; backdrop-filter: blur(6px);
-  }
-  .controls label.btn {
-    display: inline-block; background-color: var(--accent); color:#000;
-    padding: 8px 14px; font-size: 14px; border-radius: 10px; cursor: pointer;
-    border: 2px solid var(--accent); transition: all .2s ease; user-select: none; white-space: nowrap;
-  }
-  .controls label.btn:hover { filter: brightness(0.92); }
-  .controls input[type="file"] { position: absolute; opacity: 0; width: 1px; height: 1px; pointer-events: none; }
-  .controls .group { display: flex; align-items: center; gap: 8px; font-size: 13px; }
-  .controls input[type="range"] { width: 160px; }
-  .controls input[type="checkbox"] { transform: translateY(1px); }
-  .controls button {
-    background: transparent; color: var(--fg); border: 1px solid var(--accent);
-    border-radius: 8px; padding: 6px 10px; cursor: pointer; font-size: 13px;
-  }
-  .controls button:hover { background: rgba(255,255,255,0.1); }
+  .controls{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);
+    display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:center;
+    background:rgba(0,0,0,.5);border:2px solid var(--accent);border-radius:12px;padding:10px 12px;z-index:2;backdrop-filter:blur(6px)}
+  .group{display:flex;align-items:center;gap:8px;font-size:13px}
+  .controls select,.controls button{background:transparent;color:var(--fg);border:1px solid var(--accent);
+    border-radius:8px;padding:8px 12px;cursor:pointer;font-size:13px}
+  .controls button:hover,.controls select:hover{background:rgba(255,255,255,.08)}
+  .controls input[type="range"]{width:150px}
+  .controls input[type="checkbox"]{transform:translateY(1px)}
+  .hidden{display:none}
 
-  /* Hidden work elements */
-  video, canvas.offscreen { display: none; }
+  /* Hidden work elements & error */
+  video,canvas.offscreen{display:none}
+  #error{position:fixed;top:12px;left:50%;transform:translateX(-50%);
+    background:rgba(255,0,0,.12);border:1px solid rgba(255,0,0,.4);
+    color:#fff;padding:8px 12px;border-radius:8px;font-size:13px;display:none;z-index:4}
 </style>
 </head>
 <body>
   <div id="splash" aria-hidden="true"></div>
+  <div id="error" role="alert"></div>
 
-  <div id="ascii-container">
-    <canvas id="asciiCanvas"></canvas>
+  <!-- Main menu -->
+  <div id="menu" aria-modal="true">
+    <div class="panel">
+      <h1>Select your effect</h1>
+      <div class="grid">
+        <button class="effect" data-effect="ascii">ASCII Mirror</button>
+        <button class="effect" data-effect="matrix">Matrix Rain (Live Mask)</button>
+        <button class="effect" data-effect="topo">Topographic Lines</button>
+        <button class="effect" data-effect="decay">Signal Decay (Motion Tears)</button>
+        <button class="effect" data-effect="stitch">Canvas Stitching</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="stage">
+    <canvas id="outCanvas"></canvas>
   </div>
 
   <div class="controls" role="group" aria-label="Controls">
-    <input id="video-input" type="file" accept="video/*">
-    <label class="btn" for="video-input">Choose Video</label>
-
     <div class="group">
-      <span>Columns</span>
-      <input id="cols" type="range" min="60" max="180" value="120" />
-      <span id="colsVal">120</span>
+      <label>Effect
+        <select id="effect">
+          <option value="ascii">ASCII Mirror</option>
+          <option value="matrix">Matrix Rain (Live Mask)</option>
+          <option value="topo">Topographic Lines</option>
+          <option value="decay">Signal Decay (Motion Tears)</option>
+          <option value="stitch">Canvas Stitching</option>
+        </select>
+      </label>
     </div>
 
-    <div class="group">
-      <span>Font</span>
-      <input id="font" type="range" min="8" max="16" value="12" />
-      <span id="fontVal">12px</span>
+    <!-- Global basics -->
+    <div class="group"><label><input id="mirror" type="checkbox" checked> Mirror</label></div>
+    <div class="group"><label><input id="invert" type="checkbox"> Invert</label></div>
+    <button id="start">Start Camera</button>
+    <button id="stop" disabled>Stop</button>
+    <button id="toggle" disabled>Pause</button>
+
+    <!-- Per-effect controls -->
+    <div id="ctrl-ascii" class="group hidden">
+      <span>Cols</span><input id="ascii-cols" type="range" min="60" max="220" value="140"/><span id="ascii-colsVal">140</span>
+      <span>Font</span><input id="ascii-font" type="range" min="10" max="20" value="14"/><span id="ascii-fontVal">14px</span>
+      <label><input id="ascii-color" type="checkbox"> Colour</label>
     </div>
 
-    <div class="group">
-      <label><input id="invert" type="checkbox"> Invert</label>
+    <div id="ctrl-matrix" class="group hidden">
+      <span>Cols</span><input id="mx-cols" type="range" min="60" max="220" value="140"/><span id="mx-colsVal">140</span>
+      <span>Font</span><input id="mx-font" type="range" min="10" max="20" value="14"/><span id="mx-fontVal">14px</span>
+      <span>Speed</span><input id="mx-speed" type="range" min="20" max="200" value="80"/><span id="mx-speedVal">0.80x</span>
+      <span>Trail</span><input id="mx-trail" type="range" min="6" max="40" value="18"/><span id="mx-trailVal">18</span>
+      <span>Mask</span><input id="mx-mask" type="range" min="0" max="255" value="90"/><span id="mx-maskVal">90</span>
     </div>
 
-    <div class="group">
-      <label><input id="colorize" type="checkbox"> Colour</label>
+    <div id="ctrl-topo" class="group hidden">
+      <span>Cols</span><input id="tp-cols" type="range" min="60" max="240" value="180"/><span id="tp-colsVal">180</span>
+      <span>Levels</span><input id="tp-levels" type="range" min="4" max="16" value="10"/><span id="tp-levelsVal">10</span>
+      <span>Width</span><input id="tp-width" type="range" min="1" max="3" value="1"/><span id="tp-widthVal">1px</span>
+      <label><input id="tp-smooth" type="checkbox" checked> Smooth</label>
     </div>
 
-    <button id="toggle">Pause</button>
+    <div id="ctrl-decay" class="group hidden">
+      <span>Sensitivity</span><input id="dc-sense" type="range" min="5" max="80" value="22"/><span id="dc-senseVal">22</span>
+      <span>Block</span><input id="dc-block" type="range" min="1" max="12" value="4"/><span id="dc-blockVal">4</span>
+      <span>Jitter</span><input id="dc-jitter" type="range" min="0" max="10" value="3"/><span id="dc-jitterVal">3</span>
+      <span>Fade</span><input id="dc-fade" type="range" min="1" max="20" value="6"/><span id="dc-fadeVal">0.06</span>
+    </div>
+
+    <div id="ctrl-stitch" class="group hidden">
+      <span>Thresh</span><input id="st-thresh" type="range" min="0" max="255" value="120"/><span id="st-threshVal">120</span>
+      <span>Step</span><input id="st-step" type="range" min="1" max="5" value="2"/><span id="st-stepVal">2</span>
+      <span>Width</span><input id="st-width" type="range" min="1" max="3" value="1"/><span id="st-widthVal">1px</span>
+    </div>
   </div>
 
   <!-- Work elements -->
-  <video id="vid" crossorigin="anonymous" playsinline muted></video>
+  <video id="vid" playsinline muted></video>
   <canvas id="sampler" class="offscreen"></canvas>
 
 <script>
 (() => {
-  // ===== Config =====
-  const TARGET_FPS = 24;
-  const targetMs = 1000 / TARGET_FPS;
+  const TARGET_FPS = 24, targetMs = 1000 / TARGET_FPS;
 
-  const RAMPS = {
-    classic: "@%#*+=-:. ",
-    smooth: "$@B%8&WM#*oahkbdpqwmZO0QLCJUYXzcvunxrjft|()1{}[]?-_+~<>i!lI;:,\"^`'. ",
-    blocky: "MW&8%B@$#*:. "
-  };
-  const ramp = RAMPS.smooth;
+  // Katakana for Matrix
+  const KATA = Array.from('アイウエオカキクケコサシスセソタチツテトナニヌネノハヒフヘホマミムメモヤユヨラリルレロワヲン');
 
-  // ===== Elements =====
-  const container = document.getElementById('ascii-container');
-  const canvas = document.getElementById('asciiCanvas');
-  const ctx = canvas.getContext('2d');
+  // Elements
   const splash = document.getElementById('splash');
+  const menu = document.getElementById('menu');
+  const effectSel = document.getElementById('effect');
 
-  const videoInput = document.getElementById('video-input');
-  const vid = document.getElementById('vid');
+  const stage = document.getElementById('stage');
+  const canvas = document.getElementById('outCanvas');
+  const ctx = canvas.getContext('2d');
   const sampler = document.getElementById('sampler');
   const sctx = sampler.getContext('2d', { willReadFrequently: true });
+  const vid = document.getElementById('vid');
 
-  const colsSlider = document.getElementById('cols');
-  const colsVal = document.getElementById('colsVal');
-  const fontSlider = document.getElementById('font');
-  const fontVal = document.getElementById('fontVal');
-  const invertChk = document.getElementById('invert');
-  const colorizeChk = document.getElementById('colorize');
+  const startBtn = document.getElementById('start');
+  const stopBtn = document.getElementById('stop');
   const toggleBtn = document.getElementById('toggle');
+  const mirrorChk = document.getElementById('mirror');
+  const invertChk = document.getElementById('invert');
+  const errBox = document.getElementById('error');
 
-  // ===== State =====
-  let cols = parseInt(colsSlider.value, 10);
-  let fontPx = parseInt(fontSlider.value, 10);
-  let running = true;
-  let needsResize = false;
-  let needsLayout = true;
-  let needsScale = true;
+  // Per-effect panes
+  const pane = {
+    ascii:  document.getElementById('ctrl-ascii'),
+    matrix: document.getElementById('ctrl-matrix'),
+    topo:   document.getElementById('ctrl-topo'),
+    decay:  document.getElementById('ctrl-decay'),
+    stitch: document.getElementById('ctrl-stitch'),
+  };
 
-  // Monospace glyph metrics (measured)
-  let cellW = 8;   // width of a glyph cell in CSS px
-  let cellH = 12;  // height of a glyph cell in CSS px
+  // ASCII controls
+  const asciiCols = document.getElementById('ascii-cols'), asciiColsVal = document.getElementById('ascii-colsVal');
+  const asciiFont = document.getElementById('ascii-font'), asciiFontVal = document.getElementById('ascii-fontVal');
+  const asciiColor = document.getElementById('ascii-color');
 
-  // Precompute 0..255 → char lookup
+  // Matrix controls
+  const mxCols = document.getElementById('mx-cols'), mxColsVal = document.getElementById('mx-colsVal');
+  const mxFont = document.getElementById('mx-font'), mxFontVal = document.getElementById('mx-fontVal');
+  const mxSpeed = document.getElementById('mx-speed'), mxSpeedVal = document.getElementById('mx-speedVal');
+  const mxTrail = document.getElementById('mx-trail'), mxTrailVal = document.getElementById('mx-trailVal');
+  const mxMask = document.getElementById('mx-mask'), mxMaskVal = document.getElementById('mx-maskVal');
+
+  // Topo controls
+  const tpCols = document.getElementById('tp-cols'), tpColsVal = document.getElementById('tp-colsVal');
+  const tpLevels = document.getElementById('tp-levels'), tpLevelsVal = document.getElementById('tp-levelsVal');
+  const tpWidth = document.getElementById('tp-width'), tpWidthVal = document.getElementById('tp-widthVal');
+  const tpSmooth = document.getElementById('tp-smooth');
+
+  // Decay controls
+  const dcSense = document.getElementById('dc-sense'), dcSenseVal = document.getElementById('dc-senseVal');
+  const dcBlock = document.getElementById('dc-block'), dcBlockVal = document.getElementById('dc-blockVal');
+  const dcJitter = document.getElementById('dc-jitter'), dcJitterVal = document.getElementById('dc-jitterVal');
+  const dcFade = document.getElementById('dc-fade'), dcFadeVal = document.getElementById('dc-fadeVal');
+
+  // Stitch controls
+  const stThresh = document.getElementById('st-thresh'), stThreshVal = document.getElementById('st-threshVal');
+  const stStep = document.getElementById('st-step'), stStepVal = document.getElementById('st-stepVal');
+  const stWidth = document.getElementById('st-width'), stWidthVal = document.getElementById('st-widthVal');
+
+  // State
+  let currentEffect = 'ascii';
+  let running = false, needsLayout = true, needsScale = true;
+  let cols = 140, fontPx = 14;
+
+  // Glyph metrics
+  let cellW = 8, cellH = 14;
+
+  // Shared buffers
+  let prevBright = null; // for motion difference
+  const decayOff = document.createElement('canvas'), dctx = decayOff.getContext('2d');
+
+  // ASCII ramp LUT
+  const RAMP = "$@B%8&WM#*oahkbdpqwmZO0QLCJUYXzcvunxrjft|()1{}[]?-_+~<>i!lI;:,\"^`'. ";
   const LUT = (() => {
-    const arr = new Array(256);
-    const r = ramp;
-    const len = r.length - 1;
-    for (let i = 0; i < 256; i++) arr[i] = r[Math.round((i/255)*len)];
+    const arr = new Array(256), r = RAMP, len = r.length - 1;
+    for (let i=0;i<256;i++) arr[i] = r[Math.round((i/255)*len)];
     return arr;
   })();
+
+  // Matrix rain columns
+  let rainCols = []; // one stream per column
+
+  function showError(msg){ errBox.textContent=msg; errBox.style.display='block'; setTimeout(()=>errBox.style.display='none',4000); }
 
   function measureFont() {
     ctx.font = `${fontPx}px monospace`;
     ctx.textBaseline = 'top';
     const m = ctx.measureText('M');
-    const ascent  = m.actualBoundingBoxAscent  ?? fontPx * 0.8;
-    const descent = m.actualBoundingBoxDescent ?? fontPx * 0.2;
+    const asc = m.actualBoundingBoxAscent ?? fontPx*0.8;
+    const desc= m.actualBoundingBoxDescent?? fontPx*0.2;
     cellW = Math.max(1, m.width);
-    cellH = Math.max(1, ascent + descent);
+    cellH = Math.max(1, asc + desc);
   }
 
-  // *** Aspect-ratio safe sizing using measured cellW/cellH ***
-  function setSampleSize() {
-    if (!vid.videoWidth || !vid.videoHeight) return;
-    cols = parseInt(colsSlider.value, 10);
-    colsVal.textContent = cols;
-
-    const videoAspectHOverW = vid.videoHeight / vid.videoWidth; // H/W
-    const cellAspectHOverW  = cellH / cellW;                    // H/W of glyph cell
-    const rows = Math.max(1, Math.floor(cols * videoAspectHOverW / cellAspectHOverW));
-
-    // Sampler grid in "cells"
-    sampler.width = cols;
-    sampler.height = rows;
-
-    // Visible canvas in CSS pixels (one cell maps to cellW x cellH px)
+  function setGridFromCols(colsIn) {
+    const w = vid.videoWidth, h = vid.videoHeight; if(!w||!h) return;
+    cols = colsIn;
+    const videoAspect = h / w;
+    const cellAspect = cellH / cellW;
+    const rows = Math.max(1, Math.floor(cols * videoAspect / cellAspect));
+    sampler.width = cols; sampler.height = rows;
     canvas.width = Math.max(1, Math.floor(cols * cellW));
-    canvas.height = Math.max(1, Math.floor(rows * cellH));
-
+    canvas.height= Math.max(1, Math.floor(rows * cellH));
+    decayOff.width = canvas.width; decayOff.height = canvas.height;
     needsScale = true;
+    if (currentEffect === 'matrix') initMatrix(cols, rows);
   }
 
-  function applyFontSize() {
-    fontPx = parseInt(fontSlider.value, 10);
-    fontVal.textContent = fontPx + 'px';
-    measureFont();
-    needsLayout = true;
-    needsScale = true;
+  function applyScale(){
+    const availW = stage.clientWidth, availH = stage.clientHeight;
+    if(!availW||!availH||!canvas.width||!canvas.height) return;
+    const scale = Math.min(availW/canvas.width, availH/canvas.height);
+    canvas.style.transform = `scale(${scale})`;
+    needsScale = false;
   }
 
-  function toggleRun() {
-    running = !running;
-    toggleBtn.textContent = running ? 'Pause' : 'Play';
-    if (running && !vid.paused) requestAnimationFrame(renderLoop);
-  }
+  function applyInvert(){ canvas.style.filter = invertChk.checked ? 'invert(1)' : 'none'; }
 
-  function applyInvert() {
-    canvas.style.filter = invertChk.checked ? 'invert(1)' : 'none';
-  }
-
-  function drawAsciiFrame() {
+  // Brightness grid Uint8Array (cols*rows)
+  function getBrightnessGrid() {
     const w = sampler.width, h = sampler.height;
+    sctx.save();
+    if (mirrorChk.checked) { sctx.translate(w,0); sctx.scale(-1,1); }
     sctx.drawImage(vid, 0, 0, w, h);
-    const { data } = sctx.getImageData(0, 0, w, h);
+    sctx.restore();
+    const { data } = sctx.getImageData(0,0,w,h);
+    const out = new Uint8Array(w*h);
+    for (let y=0;y<h;y++){
+      const row = y*w*4, base = y*w;
+      for (let x=0;x<w;x++){
+        const i = row + x*4;
+        const r=data[i], g=data[i+1], b=data[i+2];
+        out[base+x] = (77*r + 150*g + 29*b) >> 8;
+      }
+    }
+    return out;
+  }
 
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
+  /* ----------------- EFFECTS ----------------- */
+
+  /* ASCII MIRROR */
+  function drawAscii(bright, w, h, colorize=false) {
+    ctx.clearRect(0,0,canvas.width,canvas.height);
     ctx.font = `${fontPx}px monospace`;
     ctx.textBaseline = 'top';
-
-    if (colorizeChk.checked) {
-      for (let y = 0; y < h; y++) {
-        const rowIndex = y * w * 4;
-        for (let x = 0; x < w; x++) {
-          const i = rowIndex + x*4;
-          const r = data[i], g = data[i+1], b = data[i+2];
-          const bright = (77*r + 150*g + 29*b) >> 8;
+    if (colorize) {
+      const img = sctx.getImageData(0,0,w,h).data;
+      for (let y=0;y<h;y++){
+        const row = y*w*4;
+        for (let x=0;x<w;x++){
+          const i=row+x*4;
+          const r=img[i], g=img[i+1], b=img[i+2];
           ctx.fillStyle = `rgb(${r},${g},${b})`;
-          ctx.fillText(LUT[bright], x*cellW, y*cellH);
+          ctx.fillText(LUT[bright[y*w+x]], x*cellW, y*cellH);
         }
       }
     } else {
-      for (let y = 0; y < h; y++) {
-        const rowIndex = y * w * 4;
-        const lineChars = new Array(w);
-        for (let x = 0; x < w; x++) {
-          const i = rowIndex + x*4;
-          const r = data[i], g = data[i+1], b = data[i+2];
-          const bright = (77*r + 150*g + 29*b) >> 8;
-          lineChars[x] = LUT[bright];
-        }
-        ctx.fillStyle = '#fff';
+      ctx.fillStyle='#fff';
+      for (let y=0;y<h;y++){
+        const off=y*w; const lineChars=new Array(w);
+        for (let x=0;x<w;x++) lineChars[x]=LUT[bright[off+x]];
         ctx.fillText(lineChars.join(''), 0, y*cellH);
       }
     }
   }
 
-  // Scale visible canvas to fit viewport while centred
-  function applyScale() {
-    const availW = container.clientWidth;
-    const availH = container.clientHeight;
-    if (!availW || !availH || !canvas.width || !canvas.height) return;
-    const scale = Math.min(availW / canvas.width, availH / canvas.height);
-    canvas.style.transform = `scale(${scale})`;
-    needsScale = false;
+  /* MATRIX RAIN (single clean streams per column, masked by silhouette) */
+  function initMatrix(w,h){
+    rainCols = Array.from({length:w}, ()=>({
+      y: Math.random()*-h,
+      speedBase: parseInt(mxSpeed.value,10)/100,
+      seed: Math.random()*1000, // for slight per-column variance
+    }));
+  }
+  function drawMatrix(bright, w, h) {
+    // trail fade
+    ctx.fillStyle='rgba(0,0,0,0.2)';
+    ctx.fillRect(0,0,canvas.width,canvas.height);
+
+    ctx.font = `${fontPx}px monospace`;
+    ctx.textBaseline='top';
+    const trail = parseInt(mxTrail.value,10);
+    const maskT = parseInt(mxMask.value,10);
+    const speedScale = parseInt(mxSpeed.value,10)/100;
+
+    for (let x=0;x<w;x++){
+      const col = rainCols[x];
+      // advance stream head
+      col.y += (0.6 + 0.8*Math.sin(col.seed + performance.now()*0.001))*speedScale;
+      if (col.y > h + trail) {
+        col.y = -Math.random()*h*0.3 - trail;
+        col.seed = Math.random()*1000;
+      }
+      // draw a single stream in this column
+      for (let i=0;i<trail;i++){
+        const y = Math.floor(col.y - i);
+        if (y<0 || y>=h) continue;
+        if (bright[y*w + x] < maskT) continue; // mask by brightness
+        // one katakana per (x,y) tied to coords for stability
+        const idx = ((x*73856093) ^ (y*19349663)) >>> 0;
+        const ch = KATA[idx % KATA.length];
+        const head = (i===0);
+        ctx.fillStyle = head ? 'rgba(180,255,180,0.95)' : `rgba(0,255,70,${0.85 - i/trail})`;
+        ctx.fillText(ch, x*cellW, y*cellH);
+      }
+    }
   }
 
-  // Render loop @ ~24 fps
+  /* TOPOGRAPHIC LINES (marching squares isolines) */
+  function drawTopographic(bright, w, h) {
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    const levels = parseInt(tpLevels.value,10);
+    const thick  = parseInt(tpWidth.value,10);
+    const smooth = tpSmooth.checked;
+    const thresholds = Array.from({length:levels}, (_,i)=> Math.round((i+1)*(255/(levels+1))));
+
+    ctx.lineWidth = thick;
+    ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+
+    // helper to interpolate position along cell edge
+    const lerp = (a,b,t)=> a + (b-a)*t;
+
+    for (const t of thresholds){
+      ctx.beginPath();
+      for (let y=0;y<h-1;y++){
+        for (let x=0;x<w-1;x++){
+          const i00 = bright[y*w + x],     i10 = bright[y*w + x+1];
+          const i01 = bright[(y+1)*w + x], i11 = bright[(y+1)*w + x+1];
+          let idx = 0;
+          if (i00>t) idx |= 1; if (i10>t) idx |= 2; if (i11>t) idx |= 4; if (i01>t) idx |= 8;
+          if (idx===0 || idx===15) continue;
+
+          const fx = x*cellW, fy = y*cellH, fx1=(x+1)*cellW, fy1=(y+1)*cellH;
+
+          // linear interpolation factors
+          const tx0 = (t - i00) / (i10 - i00 || 1);
+          const tx1 = (t - i01) / (i11 - i01 || 1);
+          const ty0 = (t - i00) / (i01 - i00 || 1);
+          const ty1 = (t - i10) / (i11 - i10 || 1);
+
+          // edge points
+          const eTop   = {x: lerp(fx,fx1, tx0), y: fy};
+          const eRight = {x: fx1, y: lerp(fy,fy1, ty1)};
+          const eBottom= {x: lerp(fx,fx1, tx1), y: fy1};
+          const eLeft  = {x: fx,  y: lerp(fy,fy1, ty0)};
+
+          // segment lookup (cases mirrored for continuity)
+          const drawSeg = (a,b)=>{ ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y); };
+
+          switch(idx){
+            case 1: case 14: drawSeg(eLeft, eTop); break;
+            case 2: case 13: drawSeg(eTop, eRight); break;
+            case 3: case 12: drawSeg(eLeft, eRight); break;
+            case 4: case 11: drawSeg(eRight, eBottom); break;
+            case 5:          drawSeg(eLeft, eTop); drawSeg(eRight, eBottom); break; // saddle
+            case 6: case 9:  drawSeg(eTop, eBottom); break;
+            case 7: case 8:  drawSeg(eLeft, eBottom); break;
+            case 10:         drawSeg(eTop, eRight); drawSeg(eLeft, eBottom); break; // saddle
+          }
+        }
+      }
+      ctx.stroke();
+      if (smooth) ctx.filter = 'blur(0.0001px)'; // tiny nudge helps AA merge segments visually
+      ctx.filter = 'none';
+    }
+  }
+
+  /* SIGNAL DECAY — only motion tears update over persistent background */
+  function drawDecay(bright, w, h) {
+    // fade background slightly
+    const fade = parseInt(dcFade.value,10) / 100; // slider 1..20 → 0.01..0.20
+    dctx.globalCompositeOperation = 'source-over';
+    dctx.fillStyle = `rgba(0,0,0,${fade})`;
+    dctx.fillRect(0,0,decayOff.width,decayOff.height);
+
+    const sense = parseInt(dcSense.value,10);
+    const block = parseInt(dcBlock.value,10);     // draw block size in cells
+    const jitter= parseInt(dcJitter.value,10);    // pixel jitter
+
+    // motion mask vs previous frame
+    if (!prevBright || prevBright.length !== bright.length) prevBright = new Uint8Array(bright);
+    let updates = 0;
+
+    // draw only moving blocks onto decay buffer
+    dctx.fillStyle = '#fff';
+    dctx.font = `${fontPx}px monospace`;
+    dctx.textBaseline = 'top';
+
+    for (let y=0; y<h; y+=block){
+      for (let x=0; x<w; x+=block){
+        // compute avg motion in this block
+        let sum = 0, cnt = 0;
+        for (let by=0; by<block && y+by<h; by++){
+          const base = (y+by)*w + x;
+          for (let bx=0; bx<block && x+bx<w; bx++){
+            const i = base + bx;
+            sum += Math.abs(bright[i] - prevBright[i]); cnt++;
+          }
+        }
+        const motion = sum / (cnt||1);
+        if (motion > sense){
+          // jittered placement gives torn look
+          const jx = (Math.random()*jitter) | 0;
+          const jy = (Math.random()*jitter) | 0;
+          // compose a line of block chars by brightness
+          for (let by=0; by<block && y+by<h; by++){
+            let line = '';
+            for (let bx=0; bx<block && x+bx<w; bx++){
+              const b = bright[(y+by)*w + (x+bx)];
+              line += b > 200 ? '█' : b > 150 ? '▓' : b > 100 ? '▒' : b > 60 ? '░' : ' ';
+              // update prev to prevent perpetual trigger
+              prevBright[(y+by)*w + (x+bx)] = b;
+            }
+            dctx.fillText(line, (x*cellW)+jx, ((y+by)*cellH)+jy);
+          }
+          updates++;
+        }
+      }
+    }
+
+    // blit persistent buffer
+    ctx.drawImage(decayOff, 0, 0);
+  }
+
+  /* CANVAS STITCHING — unchanged but with thresholds/step/width controls */
+  function drawStitch(bright, w, h) {
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    const thr = parseInt(stThresh.value,10);
+    const step= parseInt(stStep.value,10);
+    ctx.lineWidth = parseInt(stWidth.value,10);
+    ctx.strokeStyle = 'rgba(255,255,255,0.7)';
+    ctx.beginPath();
+    for (let y=0; y<h-step; y+=step) {
+      for (let x=0; x<w-step; x+=step) {
+        const i = y*w + x;
+        if (bright[i] > thr) {
+          const x1 = x*cellW, y1 = y*cellH;
+          if (bright[i+step] > thr) { ctx.moveTo(x1, y1); ctx.lineTo((x+step)*cellW, y1); }
+          if (bright[i+step*w] > thr) { ctx.moveTo(x1, y1); ctx.lineTo(x1, (y+step)*cellH); }
+        }
+      }
+    }
+    ctx.stroke();
+  }
+
+  /* ----------------- RENDER LOOP ----------------- */
   let lastTs = 0;
   function renderLoop(ts) {
-    if (!running || vid.paused || vid.ended) return;
-
+    if (!running) return;
     const dt = ts - lastTs;
     if (dt >= targetMs) {
       lastTs = ts;
 
-      if (needsLayout) { setSampleSize(); needsLayout = false; }
-      if (needsResize) { setSampleSize(); needsResize = false; }
+      if (needsLayout) { setGridFromCols(cols); needsLayout = false; }
+      const w = sampler.width, h = sampler.height;
+      const bright = getBrightnessGrid();
 
-      drawAsciiFrame();
+      switch (currentEffect) {
+        case 'ascii':  drawAscii(bright, w, h, asciiColor.checked); break;
+        case 'matrix': drawMatrix(bright, w, h); break;
+        case 'topo':   drawTopographic(bright, w, h); break;
+        case 'decay':  drawDecay(bright, w, h); break;
+        case 'stitch': drawStitch(bright, w, h); break;
+      }
+
       if (needsScale) applyScale();
     }
     requestAnimationFrame(renderLoop);
   }
 
-  // ===== Events =====
-  videoInput.addEventListener('change', async (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  /* ----------------- CAMERA ----------------- */
+  async function startCamera() {
     try {
-      vid.src = URL.createObjectURL(file);
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" }, audio: false });
+      vid.srcObject = stream;
       await vid.play();
-    } catch (err) {
-      vid.muted = true;
-      await vid.play().catch(()=>{});
-    }
-  });
 
-  vid.addEventListener('playing', () => {
-    // Hide splash fully
-    splash.classList.add('hide');
-    setTimeout(() => { splash.style.display = 'none'; }, 340);
+      splash.classList.add('hide'); setTimeout(()=>{ splash.style.display='none'; }, 340);
+      menu.style.display = 'none';
 
-    // Layout & start loop
-    measureFont();
-    setSampleSize();
-    applyScale();
+      measureFont();
+      setGridFromCols(cols);
+      applyScale();
 
-    running = true;
+      running = true;
+      toggleBtn.disabled = false;
+      stopBtn.disabled = false;
+      startBtn.disabled = true;
+      requestAnimationFrame(renderLoop);
+    } catch (err) { console.error(err); showError('Unable to access camera. Check permissions and HTTPS.'); }
+  }
+
+  function stopCamera() {
+    running = false;
     toggleBtn.textContent = 'Pause';
-    requestAnimationFrame(renderLoop);
+    toggleBtn.disabled = true;
+    startBtn.disabled = false;
+    stopBtn.disabled = true;
+
+    if (vid.srcObject) { vid.srcObject.getTracks().forEach(t => t.stop()); vid.srcObject = null; }
+    splash.style.display = ''; requestAnimationFrame(()=> splash.classList.remove('hide'));
+    menu.style.display = '';
+  }
+
+  function toggleRun() {
+    if (!vid.srcObject) return;
+    running = !running;
+    toggleBtn.textContent = running ? 'Pause' : 'Play';
+    if (running) requestAnimationFrame(renderLoop);
+  }
+
+  /* ----------------- UI WIRING ----------------- */
+  function showPane(name){
+    for (const k in pane) pane[k].classList.add('hidden');
+    pane[name].classList.remove('hidden');
+  }
+  function selectEffect(name){
+    currentEffect = name;
+    effectSel.value = name;
+    // set sensible defaults per effect
+    if (name==='ascii'){ cols = parseInt(asciiCols.value,10); fontPx = parseInt(asciiFont.value,10); }
+    if (name==='matrix'){ cols = parseInt(mxCols.value,10); fontPx = parseInt(mxFont.value,10); initMatrix(sampler.width||cols, sampler.height||cols); }
+    if (name==='topo'){ cols = parseInt(tpCols.value,10); }
+    if (name==='decay'){ /* persistent buffer is maintained */ }
+    if (name==='stitch'){ /* no special init */ }
+    measureFont(); needsLayout = true; needsScale = true; showPane(name);
+  }
+
+  // Menu buttons
+  menu.querySelectorAll('button.effect').forEach(btn => {
+    btn.addEventListener('click', (e) => { selectEffect(e.currentTarget.dataset.effect); startCamera(); });
   });
 
-  vid.addEventListener('loadedmetadata', () => {
-    // Ensure we have valid font metrics before sizing
-    measureFont();
-    needsLayout = true;
-  });
+  // Dropdown
+  effectSel.addEventListener('change', (e)=> selectEffect(e.target.value));
 
-  colsSlider.addEventListener('input', () => { colsVal.textContent = colsSlider.value; needsResize = true; });
-  fontSlider.addEventListener('input', applyFontSize);
-  invertChk.addEventListener('change', applyInvert);
-  colorizeChk.addEventListener('change', () => {}); // keep toggle
+  // Global controls
+  startBtn.addEventListener('click', startCamera);
+  stopBtn.addEventListener('click', stopCamera);
   toggleBtn.addEventListener('click', toggleRun);
+  document.getElementById('mirror').addEventListener('change', ()=>{});
+  invertChk.addEventListener('change', applyInvert);
+  window.addEventListener('resize', ()=>{ needsScale = true; });
 
-  window.addEventListener('resize', () => { needsScale = true; });
+  // ASCII controls
+  asciiCols.addEventListener('input', ()=>{ asciiColsVal.textContent = asciiCols.value; cols = parseInt(asciiCols.value,10); needsLayout = true; });
+  asciiFont.addEventListener('input', ()=>{ asciiFontVal.textContent = asciiFont.value+'px'; fontPx = parseInt(asciiFont.value,10); measureFont(); needsLayout = true; needsScale = true; });
 
-  // Init
-  measureFont();
+  // Matrix controls
+  mxCols.addEventListener('input', ()=>{ mxColsVal.textContent = mxCols.value; cols = parseInt(mxCols.value,10); needsLayout = true; initMatrix(cols, sampler.height); });
+  mxFont.addEventListener('input', ()=>{ mxFontVal.textContent = mxFont.value+'px'; fontPx = parseInt(mxFont.value,10); measureFont(); needsLayout = true; needsScale = true; initMatrix(sampler.width||cols, sampler.height||cols); });
+  mxSpeed.addEventListener('input', ()=>{ mxSpeedVal.textContent = (parseInt(mxSpeed.value,10)/100).toFixed(2)+'x'; });
+  mxTrail.addEventListener('input', ()=>{ mxTrailVal.textContent = mxTrail.value; });
+  mxMask.addEventListener('input', ()=>{ mxMaskVal.textContent = mxMask.value; });
+
+  // Topo controls
+  tpCols.addEventListener('input', ()=>{ tpColsVal.textContent = tpCols.value; cols = parseInt(tpCols.value,10); needsLayout = true; });
+  tpLevels.addEventListener('input', ()=>{ tpLevelsVal.textContent = tpLevels.value; });
+  tpWidth.addEventListener('input', ()=>{ tpWidthVal.textContent = tpWidth.value+'px'; });
+  tpSmooth.addEventListener('change', ()=>{});
+
+  // Decay controls
+  dcSense.addEventListener('input', ()=>{ dcSenseVal.textContent = dcSense.value; });
+  dcBlock.addEventListener('input', ()=>{ dcBlockVal.textContent = dcBlock.value; });
+  dcJitter.addEventListener('input', ()=>{ dcJitterVal.textContent = dcJitter.value; });
+  dcFade.addEventListener('input', ()=>{ dcFadeVal.textContent = (parseInt(dcFade.value,10)/100).toFixed(2); });
+
+  // Stitch controls
+  stThresh.addEventListener('input', ()=>{ stThreshVal.textContent = stThresh.value; });
+  stStep.addEventListener('input', ()=>{ stStepVal.textContent = stStep.value; });
+  stWidth.addEventListener('input', ()=>{ stWidthVal.textContent = stWidth.value+'px'; });
+
+  // Init UI defaults
   applyInvert();
+  showPane('ascii'); // show ascii controls on load
 })();
 </script>
 </body>
